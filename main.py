@@ -478,7 +478,7 @@ class VideoGenerator:
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(temp_video, fourcc, self.fps, (1080, 1920))
 
-        total_duration = 11
+        total_duration = 15
         marking_start = 8
 
         # Determine winner based on final stats
@@ -509,10 +509,15 @@ class VideoGenerator:
         base_video = VideoFileClip(temp_video)
         insert_video = VideoFileClip("output_video_with_audio.mp4").subclip(0, 4.5)
         marking_video = VideoFileClip("marked_without_green.mp4")
+        sui = VideoFileClip("celebration_without_green.mp4")
+
+        # Check the duration of the celebration clip
+        print(f"Duration of celebration clip: {sui.duration} seconds")
 
         # Remove black background from the overlay videos
         insert_video = mask_color(insert_video, color=(0, 0, 0), thr=50, s=10)
         marking_video = mask_color(marking_video, color=(0, 0, 0), thr=50, s=10)
+        sui = mask_color(sui, color=(0, 0, 0), thr=50, s=10)
 
         # Position the overlay videos
         x_center = (1080 - insert_video.w) // 2
@@ -527,10 +532,20 @@ class VideoGenerator:
 
         marking_video = marking_video.set_position((marking_x, marking_y)).set_start(marking_start)
 
+        # Ensure the celebration clip doesn't exceed its duration
+        start_time = 9
+        end_time = min(sui.duration, total_duration - start_time)  # Adjust end time based on clip duration
+
+        # Position the celebration video and set its duration
+        sui_x_center = (1080 - sui.w) // 2
+        sui_y_center = (1920 - sui.h) // 2
+        sui = sui.set_position((sui_x_center, sui_y_center)).set_start(start_time).set_end(start_time + end_time)
+
         # Combine all clips
         video_clips = [base_video, insert_video]
         if winner:
             video_clips.append(marking_video)
+        video_clips.append(sui)  # Add celebration video to the sequence
 
         final_video = CompositeVideoClip(video_clips)
 
@@ -543,6 +558,10 @@ class VideoGenerator:
         video_audios = [insert_video.audio.set_start(2)]
         if winner:
             video_audios.append(marking_video.audio.set_start(marking_start))
+
+        # Add sui audio if available
+        if sui.audio:
+            video_audios.append(sui.audio.set_start(start_time))  # Adjust start time as needed
 
         all_audio = title_audio + video_audios
         final_video.audio = CompositeAudioClip(all_audio)
@@ -558,6 +577,7 @@ class VideoGenerator:
         base_video.close()
         insert_video.close()
         marking_video.close()
+        sui.close()
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
-from moviepy.editor import VideoFileClip, AudioFileClip
-import cv2
-import numpy as np
-
-
+# from moviepy.editor import VideoFileClip, AudioFileClip
+# import cv2
+# import numpy as np
+#
+#
 # def remove_green_bg_with_audio(input_video, output_video, bg_color=(0, 0, 0)):
 #     """
 #     Removes the green background from a video while retaining its audio.
@@ -61,8 +61,8 @@ import numpy as np
 #
 #
 # # Example usage
-# input_video_path = "green.mp4"
-# output_video_path = "marked_without_green.mp4"
+# input_video_path = "celebration_green.mp4"
+# output_video_path = "celebration_without_green.mp4"
 # remove_green_bg_with_audio(input_video_path, output_video_path, bg_color=(0, 0, 0))
 
 
