@@ -8,17 +8,41 @@ import google.generativeai as genai
 from gtts import gTTS
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip, CompositeAudioClip
 
+from test import download_images
 
+used_comparisons = set()  # To store unique combinations of players, stats, and categories.
 
-used_titles = set()
+def generate_unique_filename(title, player1, player2, stat1, stat2):
+    """
+    Generate a sanitized, descriptive filename for a video comparison.
+    Ensures consistent player order to avoid duplicate entries.
+    """
+    players = sorted([(player1, stat1), (player2, stat2)], key=lambda x: x[0].lower())
+    sanitized_title = title.replace(" ", "_").replace("-", "_")
+    sanitized_player1 = players[0][0].replace(" ", "_").replace("-", "_")
+    sanitized_player2 = players[1][0].replace(" ", "_").replace("-", "_")
+    stat1, stat2 = players[0][1], players[1][1]
+    filename = f"{sanitized_title}_{sanitized_player1}_vs_{sanitized_player2}_{stat1}_{stat2}.mp4"
+    return filename
+
+def is_comparison_unique(title, player1, player2, stat1, stat2):
+    """
+    Check if the comparison is unique by verifying content-level uniqueness.
+    """
+    players = sorted([(player1, stat1), (player2, stat2)], key=lambda x: x[0].lower())
+    comparison_key = (title, players[0][0], players[1][0], players[0][1], players[1][1])
+    if comparison_key in used_comparisons:
+        return False
+    used_comparisons.add(comparison_key)
+    return True
 
 
 def get_ai_comparison(api_key):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        unique_title = False
-        while not unique_title:
+        unique_comparison = False
+        while not unique_comparison:
             prompt = f"""
             Generate a unique football statistics comparison. Choose from these categories:
             - Career Goals
@@ -35,7 +59,7 @@ def get_ai_comparison(api_key):
             Return in this exact JSON format:
             {{
                 "title": "your chosen category",
-                "player1": "footballer from [MESSI, CR7, PELE, MARADONA, NEYMAR]",
+                "player1": "Top 100 footballer only surnames",
                 "player2": "different footballer from the same list",
                 "stat1": corresponding statistic for player1,
                 "stat2": corresponding statistic for player2
@@ -43,9 +67,10 @@ def get_ai_comparison(api_key):
 
             Requirements:
             - Generate random but accurate statistics
-            - player1 must not be always winner. player2 should win sometimes 50/50%
-            - Use different players each time
-            - Return only the JSON object
+            - player1 and player2 should have a 50/50 chance of being the winner, meaning they should win equally as often.
+            - player1 should not always be the winner; player2 should win in about half of the comparisons.
+            - Use different players each time.
+            - Return only the JSON object.
             """
 
             response = model.generate_content(prompt, safety_settings=[
@@ -58,23 +83,20 @@ def get_ai_comparison(api_key):
             response_text = response.text.strip()
             json_str = response_text[response_text.find('{'):response_text.rfind('}') + 1]
             data = json.loads(json_str)
-            uniq_name = generate_unique_filename(data['title'], data['player1'], data['player2'], data['stat1'], data['stat2'])
-            if os.path.exists(uniq_name):
-                print("File already exists.... Regenerating")
-                get_ai_comparison(api_key)
-            print(data)
 
-            title = data['title']
-            if title not in used_titles:
-                used_titles.add(title)
-                unique_title = True
+            title, player1, player2, stat1, stat2 = data['title'], data['player1'], data['player2'], int(
+                data['stat1']), int(data['stat2'])
 
-        return (
-            title,
-            *sorted([data['player1'], data['player2']]),
-            int(data['stat1']),
-            int(data['stat2'])
-        )
+            if is_comparison_unique(title, player1, player2, stat1, stat2):
+                uniq_name = generate_unique_filename(title, player1, player2, stat1, stat2)
+                if not os.path.exists(uniq_name):
+                    unique_comparison = True
+                else:
+                    print("File already exists.... Regenerating")
+            else:
+                print("Duplicate content.... Regenerating")
+
+        return title, player1, player2, stat1, stat2
 
     except Exception as e:
         logging.error(f"Error getting AI response: {str(e)}")
@@ -350,9 +372,9 @@ if __name__ == "__main__":
         generator = VideoGenerator()
         result = get_ai_comparison(api_key="AIzaSyB0RF_0w_ailsBfbDjClMN5jSdk4xQjRlQ")
 
-        # Generate unique filename based on the stats and players
         unique_filename = generate_unique_filename(result[0], result[1], result[2], result[3], result[4])
-
+        players = [result[1], result[2]]
+        download_images(players, save_dir="/home/sandro/PycharmProjects/Shorts/images")
         generator.generate_video(
             title=result[0],
             player1=result[1],
