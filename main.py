@@ -10,7 +10,7 @@ from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip, Com
 
 from test import download_images
 
-used_comparisons = set()  # To store unique combinations of players, stats, and categories.
+used_comparisons = set()
 
 def generate_unique_filename(title, player1, player2, stat1, stat2):
     """
@@ -103,20 +103,141 @@ def get_ai_comparison(api_key):
         return None
 
 
-def create_stat_box_gradient(width, height, is_player_one=True):
-    gradient = np.zeros((height, width, 3), np.uint8)
+def create_stat_box_gradient(width: int, height: int, is_player_one: bool = True, background_image: Image = None) -> Image:
+    """
+    Generate a vertical gradient image representing a stat box, optionally overlaying a detailed football-themed background image.
+
+    Args:
+        width (int): Width of the gradient image in pixels.
+        height (int): Height of the gradient image in pixels.
+        is_player_one (bool): Flag to determine the gradient color scheme. Defaults to True.
+        background_image (Image): Optional PIL Image to use as the background. Defaults to None.
+
+    Returns:
+        Image: A PIL Image object containing the gradient with a football-themed background.
+    """
+    # Initialize an array for the gradient with shape (height, width, 3) for RGB channels
+    gradient = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Define base RGB values and their ranges for interpolation
+    base_rgb, range_rgb = (
+        ([0, 82, 212], [67, 100, 43]) if is_player_one else ([212, 0, 0], [43, 67, 67])
+    )
+
+    # Populate the gradient by interpolating RGB values vertically
     for y in range(height):
-        progress = y / height
-        if is_player_one:
-            r = int(0 + (67 * progress))
-            g = int(82 + (100 * progress))
-            b = int(212 + (43 * progress))
-        else:
-            r = int(212 + (43 * progress))
-            g = int(0 + (67 * progress))
-            b = int(0 + (67 * progress))
-        gradient[y, :] = [b, g, r]
-    return Image.fromarray(gradient)
+        progress = y / height  # Calculate progress as a ratio (0 to 1)
+        gradient[y, :] = [
+            int(base_rgb[2] + range_rgb[2] * progress),  # Blue channel
+            int(base_rgb[1] + range_rgb[1] * progress),  # Green channel
+            int(base_rgb[0] + range_rgb[0] * progress)   # Red channel
+        ]
+
+    # Convert the gradient numpy array into a PIL Image
+    gradient_image = Image.fromarray(gradient)
+
+    # Create a football-themed background if no custom background is provided
+    if not background_image:
+        background_image = Image.new("RGB", (width, height), "green")
+        draw = ImageDraw.Draw(background_image)
+
+        # Define margins and line widths for the football field
+        field_margin = 20
+        line_width = 5
+
+        # Draw field boundaries
+        draw.rectangle(
+            [
+                (field_margin, field_margin),
+                (width - field_margin, height - field_margin)
+            ],
+            outline="white",
+            width=line_width
+        )
+
+        # Draw penalty boxes
+        penalty_box_margin = 100
+        penalty_box_height = height // 4
+        draw.rectangle(
+            [
+                (field_margin, height // 2 - penalty_box_height),
+                (field_margin + penalty_box_margin, height // 2 + penalty_box_height)
+            ],
+            outline="white",
+            width=line_width
+        )
+        draw.rectangle(
+            [
+                (width - field_margin - penalty_box_margin, height // 2 - penalty_box_height),
+                (width - field_margin, height // 2 + penalty_box_height)
+            ],
+            outline="white",
+            width=line_width
+        )
+
+        # Draw the center circle
+        center_x, center_y = width // 2, height // 2
+        circle_radius = min(width, height) // 6
+        draw.ellipse(
+            [
+                (center_x - circle_radius, center_y - circle_radius),
+                (center_x + circle_radius, center_y + circle_radius)
+            ],
+            outline="white",
+            width=line_width
+        )
+
+        # Draw the center line
+        draw.line(
+            [(center_x, field_margin), (center_x, height - field_margin)],
+            fill="white",
+            width=line_width
+        )
+
+        # Add smaller field markings (e.g., goal areas, penalty spots)
+        goal_area_margin = 50
+        goal_area_height = height // 8
+        draw.rectangle(
+            [
+                (field_margin, height // 2 - goal_area_height),
+                (field_margin + goal_area_margin, height // 2 + goal_area_height)
+            ],
+            outline="white",
+            width=line_width
+        )
+        draw.rectangle(
+            [
+                (width - field_margin - goal_area_margin, height // 2 - goal_area_height),
+                (width - field_margin, height // 2 + goal_area_height)
+            ],
+            outline="white",
+            width=line_width
+        )
+
+        # Draw penalty spots
+        penalty_spot_offset = penalty_box_margin - 20
+        draw.ellipse(
+            [
+                (field_margin + penalty_spot_offset - 3, height // 2 - 3),
+                (field_margin + penalty_spot_offset + 3, height // 2 + 3)
+            ],
+            fill="white"
+        )
+        draw.ellipse(
+            [
+                (width - field_margin - penalty_spot_offset - 3, height // 2 - 3),
+                (width - field_margin - penalty_spot_offset + 3, height // 2 + 3)
+            ],
+            fill="white"
+        )
+
+    # Blend the gradient with the football background
+    background_image = background_image.resize((width, height))
+    gradient_image = Image.blend(background_image.convert("RGB"), gradient_image, alpha=0.5)
+
+    return gradient_image
+
+
 
 
 class VideoGenerator:
@@ -144,25 +265,81 @@ class VideoGenerator:
         self.additional_stat_value_font = ImageFont.truetype(self.font_path, 36)
 
     def create_gradient_background(self):
-        gradient = np.zeros((self.height, self.width, 3), np.uint8)
+        """
+        Create a green football field-themed gradient background.
+
+        Returns:
+            Image: A PIL Image object representing the background.
+        """
+        # Create a green gradient
+        gradient = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         for y in range(self.height):
             progress = y / self.height
-            r = int(10 * (1 - progress))
-            g = int(17 * (1 - progress))
-            b = int(40 * (1 - progress))
-            gradient[y, :] = [b, g, r]
-        return Image.fromarray(gradient)
+            r = int(34 * (1 - progress))
+            g = int(139 * (1 - progress)) + int(71 * progress)
+            b = int(34 * (1 - progress))
+            gradient[y, :] = [r, g, b]
+
+        gradient_image = Image.fromarray(gradient)
+
+        # Draw football field markings
+        draw = ImageDraw.Draw(gradient_image)
+
+        field_margin = 50
+        line_width = 10
+
+        # Field boundary
+        draw.rectangle(
+            [(field_margin, field_margin),
+             (self.width - field_margin, self.height - field_margin)],
+            outline="white", width=line_width
+        )
+
+        # Center line
+        center_x = self.width // 2
+        draw.line(
+            [(center_x, field_margin), (center_x, self.height - field_margin)],
+            fill="white", width=line_width
+        )
+
+        # Center circle
+        center_y = self.height // 2
+        circle_radius = 100
+        draw.ellipse(
+            [(center_x - circle_radius, center_y - circle_radius),
+             (center_x + circle_radius, center_y + circle_radius)],
+            outline="white", width=line_width
+        )
+
+        # Penalty boxes
+        penalty_box_width = 200
+        penalty_box_height = 400
+        draw.rectangle(
+            [(field_margin, center_y - penalty_box_height // 2),
+             (field_margin + penalty_box_width, center_y + penalty_box_height // 2)],
+            outline="white", width=line_width
+        )
+        draw.rectangle(
+            [(self.width - field_margin - penalty_box_width, center_y - penalty_box_height // 2),
+             (self.width - field_margin, center_y + penalty_box_height // 2)],
+            outline="white", width=line_width
+        )
+
+        return gradient_image
 
     def create_frame(self, title, player1, player2, number1, number2, additional_stats=None, winner=None,
                      winner_color='white'):
+        # Create a single frame with a gradient background and various overlays
         image = self.create_gradient_background()
         draw = ImageDraw.Draw(image)
 
+        # Draw the title text at the top
         title_text = title.upper()
         title_bbox = draw.textbbox((0, 0), title_text, font=self.title_font)
         title_width = title_bbox[2] - title_bbox[0]
         title_y = 60
 
+        # Add a shadow effect behind the title text
         shadow_color = (255, 255, 255, 77)
         for offset in range(1, 21):
             draw.text(((self.width - title_width) // 2, title_y), title_text,
@@ -170,22 +347,26 @@ class VideoGenerator:
         draw.text(((self.width - title_width) // 2, title_y), title_text,
                   font=self.title_font, fill='white')
 
+        # Draw the "VS" text in the middle
         vs_text = "VS"
         vs_bbox = draw.textbbox((0, 0), vs_text, font=self.vs_font)
         vs_width = vs_bbox[2] - vs_bbox[0]
         vs_x = (self.width - vs_width) // 2
         vs_y = (self.height // 2) - 100
 
+        # Add a gradient shadow effect for the "VS" text
         for offset in range(1, 31):
             alpha = int(128 * (1 - offset / 30))
             draw.text((vs_x, vs_y), vs_text, font=self.vs_font,
                       fill=(255, 52, 52, alpha))
         draw.text((vs_x, vs_y), vs_text, font=self.vs_font, fill='#ff3434')
 
+        # Position player names, images, and stats
         player_section_y = 200
         for idx, (player, number) in enumerate([(player1, number1), (player2, number2)]):
             x_base = self.width // 4 if idx == 0 else 3 * self.width // 4
 
+            # Draw player names below their respective images
             player_text = player.upper()
             player_bbox = draw.textbbox((0, 0), player_text, font=self.player_font)
             player_width = player_bbox[2] - player_bbox[0]
@@ -193,15 +374,18 @@ class VideoGenerator:
             draw.text((x_base - player_width // 2, player_y), player_text,
                       font=self.player_font, fill='white')
 
+            # Load and resize player images
             player_image_path = f"images/{player.lower()}.jpg"
             player_image = Image.open(player_image_path)
             player_image = player_image.resize((150, 150))
 
+            # Position player images
             image_x = x_base - 75
             image_y = player_section_y + 100
 
             image.paste(player_image, (image_x, image_y))
 
+            # Display stats in boxes with gradient effects
             stat_text = str(number)
             stat_bbox = draw.textbbox((0, 0), stat_text, font=self.stat_font)
             stat_width = stat_bbox[2] - stat_bbox[0]
@@ -209,31 +393,23 @@ class VideoGenerator:
             box_padding = 30
             box_height = 150
             box_width = stat_width + (box_padding * 2)
-            stat_box = create_stat_box_gradient(box_width, box_height, idx == 0)
 
             box_x = x_base - (box_width // 2)
             box_y = player_y + 100
 
+            # Add shadow for the stat box
             shadow_color = (0, 82, 212, 77) if idx == 0 else (212, 0, 0, 77)
             for offset in range(1, 31):
                 shadow_y = box_y + offset
                 draw.rectangle([box_x, shadow_y, box_x + box_width, shadow_y + box_height],
                                fill=shadow_color)
 
-            image.paste(stat_box, (box_x, box_y))
+            # Determine color for winner's stat
+            stat_color = 'green' if winner == idx + 1 and winner_color == 'green' else 'white'
 
-            stat_x = x_base - (stat_width // 2)
-            stat_y = box_y + ((box_height - stat_bbox[3]) // 2)
+            draw.text((box_x + box_padding, box_y + box_padding), stat_text, font=self.stat_font, fill=stat_color)
 
-            if winner == 1 and idx == 0 and winner_color == 'green':
-                stat_color = 'green'
-            elif winner == 2 and idx == 1 and winner_color == 'green':
-                stat_color = 'green'
-            else:
-                stat_color = 'white'
-
-            draw.text((stat_x, stat_y), stat_text, font=self.stat_font, fill=stat_color)
-
+        # Display additional stats (if any) at the bottom
         if additional_stats:
             stat_y = self.height - 200
             num_stats = len(additional_stats)
@@ -242,6 +418,7 @@ class VideoGenerator:
             for idx, (label, value) in enumerate(additional_stats):
                 x_pos = stat_spacing * (idx + 1)
 
+                # Draw background rectangle for additional stats
                 stat_box_padding = 20
                 label_bbox = draw.textbbox((0, 0), label, font=self.additional_stat_label_font)
                 value_bbox = draw.textbbox((0, 0), str(value), font=self.additional_stat_value_font)
@@ -311,8 +488,6 @@ class VideoGenerator:
                         .set_position((x_center, y_center))
                         .set_start(2))
 
-        # Position the marking video based on winner
-        # Assuming the marking video should be positioned around the stat box area
         marking_y = 850  # Increased from 700 to 850 to move down
 
         if winner == 1:
@@ -326,7 +501,6 @@ class VideoGenerator:
                          .set_position((marking_x, marking_y))
                          .set_start(marking_start))  # Start at 8 seconds
 
-        # Only add marking video if there's a winner
         video_clips = [base_video, insert_video]
         if winner:
             video_clips.append(marking_video)
@@ -356,16 +530,6 @@ class VideoGenerator:
         base_video.close()
         insert_video.close()
         marking_video.close()
-
-
-def generate_unique_filename(title, player1, player2, stat1, stat2):
-    sanitized_title = title.replace(" ", "_").replace("-", "_")
-    sanitized_player1 = player1.replace(" ", "_").replace("-", "_")
-    sanitized_player2 = player2.replace(" ", "_").replace("-", "_")
-
-    filename = f"{sanitized_title}_{sanitized_player1}_vs_{sanitized_player2}_{stat1}_{stat2}.mp4"
-    return filename
-
 
 if __name__ == "__main__":
     try:
