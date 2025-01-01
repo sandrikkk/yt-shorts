@@ -7,6 +7,7 @@ import os
 import google.generativeai as genai
 from gtts import gTTS
 from moviepy.editor import VideoFileClip, AudioFileClip, CompositeVideoClip, CompositeAudioClip
+from moviepy.video.fx.mask_color import mask_color
 
 from test import download_images
 
@@ -331,6 +332,7 @@ class VideoGenerator:
                      winner_color='white'):
         # Create a single frame with a gradient background and various overlays
         image = self.create_gradient_background()
+        image = image.convert('RGBA')
         draw = ImageDraw.Draw(image)
 
         # Draw the title text at the top
@@ -374,16 +376,42 @@ class VideoGenerator:
             draw.text((x_base - player_width // 2, player_y), player_text,
                       font=self.player_font, fill='white')
 
-            # Load and resize player images
+            # Load and process player images with color correction
             player_image_path = f"images/{player.lower()}.jpg"
-            player_image = Image.open(player_image_path)
-            player_image = player_image.resize((150, 150))
+            player_image = Image.open(player_image_path).convert('RGB')
 
-            # Position player images
+            # Color correction
+            # Convert to numpy array for easier processing
+            img_array = np.array(player_image)
+
+            # Calculate the average color balance
+            avg_color = np.mean(img_array, axis=(0, 1))
+
+            # If blue channel is dominant, adjust color balance
+            if avg_color[2] > avg_color[0] * 1.2 and avg_color[2] > avg_color[1] * 1.2:
+                # Reduce blue channel and enhance red/green channels
+                correction_factor = avg_color[2] / ((avg_color[0] + avg_color[1]) / 2)
+                img_array[:, :, 2] = np.clip(img_array[:, :, 2] / correction_factor, 0, 255)
+                img_array[:, :, 0] = np.clip(img_array[:, :, 0] * 1.2, 0, 255)  # Enhance red
+                img_array[:, :, 1] = np.clip(img_array[:, :, 1] * 1.2, 0, 255)  # Enhance green
+
+            # Convert back to PIL Image
+            player_image = Image.fromarray(img_array.astype('uint8'))
+
+            # Convert to RGBA and resize
+            player_image = player_image.convert('RGBA')
+            player_image = player_image.resize((150, 150), Image.Resampling.LANCZOS)
+
+            # Create a mask for the player image
+            if player_image.mode == 'RGBA':
+                mask = player_image.split()[3]
+            else:
+                mask = None
+
+            # Position and paste the image
             image_x = x_base - 75
             image_y = player_section_y + 100
-
-            image.paste(player_image, (image_x, image_y))
+            image.paste(player_image, (image_x, image_y), mask)
 
             # Display stats in boxes with gradient effects
             stat_text = str(number)
@@ -406,8 +434,8 @@ class VideoGenerator:
 
             # Determine color for winner's stat
             stat_color = 'green' if winner == idx + 1 and winner_color == 'green' else 'white'
-
-            draw.text((box_x + box_padding, box_y + box_padding), stat_text, font=self.stat_font, fill=stat_color)
+            draw.text((box_x + box_padding, box_y + box_padding), stat_text,
+                      font=self.stat_font, fill=stat_color)
 
         # Display additional stats (if any) at the bottom
         if additional_stats:
@@ -433,6 +461,8 @@ class VideoGenerator:
                 draw.text((x_pos - (value_bbox[2] - value_bbox[0]) // 2, stat_y + 40),
                           str(value), font=self.additional_stat_value_font, fill='white')
 
+        # Convert back to RGB before returning numpy array
+        image = image.convert('RGB')
         return np.array(image)
 
 
@@ -448,13 +478,13 @@ class VideoGenerator:
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(temp_video, fourcc, self.fps, (1080, 1920))
 
-        total_duration = 10  # 10 seconds total
-        marking_start = 8  # Start marking effect at 8 seconds
+        total_duration = 11
+        marking_start = 8
 
-        # Determine winner once
+        # Determine winner based on final stats
         winner = 1 if final_num1 > final_num2 else (2 if final_num2 > final_num1 else None)
 
-        # Generate base frames
+        # Generate video frames
         for frame_num in range(self.fps * total_duration):
             second = frame_num / self.fps
             if second < 5:
@@ -466,7 +496,7 @@ class VideoGenerator:
             else:
                 num1, num2 = final_num1, final_num2
 
-            # Only change color to green in the last 2 seconds for the winner
+            # Highlight winner in the last 2 seconds
             winner_color = 'green' if second >= marking_start and winner else 'white'
 
             frame = self.create_frame(title, player1, player2, num1, num2,
@@ -475,32 +505,29 @@ class VideoGenerator:
 
         out.release()
 
-        # Load videos
+        # Load base and overlay videos
         base_video = VideoFileClip(temp_video)
         insert_video = VideoFileClip("output_video_with_audio.mp4").subclip(0, 4.5)
         marking_video = VideoFileClip("marked_without_green.mp4")
 
-        # Position the insert video (middle animation)
+        # Remove black background from the overlay videos
+        insert_video = mask_color(insert_video, color=(0, 0, 0), thr=50, s=10)
+        marking_video = mask_color(marking_video, color=(0, 0, 0), thr=50, s=10)
+
+        # Position the overlay videos
         x_center = (1080 - insert_video.w) // 2
         y_center = (1920 - insert_video.h) // 1.75
+        insert_video = insert_video.set_position((x_center, y_center)).set_start(2)
 
-        insert_video = (insert_video
-                        .set_position((x_center, y_center))
-                        .set_start(2))
-
-        marking_y = 850  # Increased from 700 to 850 to move down
-
+        marking_y = 850  # Adjusted position
         if winner == 1:
-            # Position for player 1 (left side)
             marking_x = 1080 // 4 - marking_video.w // 2
         else:
-            # Position for player 2 (right side)
             marking_x = (3 * 1080 // 4) - marking_video.w // 2
 
-        marking_video = (marking_video
-                         .set_position((marking_x, marking_y))
-                         .set_start(marking_start))  # Start at 8 seconds
+        marking_video = marking_video.set_position((marking_x, marking_y)).set_start(marking_start)
 
+        # Combine all clips
         video_clips = [base_video, insert_video]
         if winner:
             video_clips.append(marking_video)
@@ -512,7 +539,7 @@ class VideoGenerator:
         self.create_title_audio(title_text)
         title_audio = [AudioFileClip(audio_file) for audio_file, _ in self.audio_segments]
 
-        # Combine audio from both insert_video and marking_video
+        # Combine audio from overlay videos
         video_audios = [insert_video.audio.set_start(2)]
         if winner:
             video_audios.append(marking_video.audio.set_start(marking_start))
@@ -520,6 +547,7 @@ class VideoGenerator:
         all_audio = title_audio + video_audios
         final_video.audio = CompositeAudioClip(all_audio)
 
+        # Export final video
         final_video.write_videofile(output_filename, codec='libx264', audio_codec='aac')
 
         # Cleanup
@@ -530,6 +558,7 @@ class VideoGenerator:
         base_video.close()
         insert_video.close()
         marking_video.close()
+
 
 if __name__ == "__main__":
     try:
